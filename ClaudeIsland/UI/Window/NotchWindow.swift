@@ -11,6 +11,13 @@ import AppKit
 
 // Use NSPanel subclass for non-activating behavior
 class NotchPanel: NSPanel {
+    /// 由 NotchWindowController 注入：当 sendEvent 为了点击穿透临时把
+    /// `ignoresMouseEvents` 置为 true 后，必须由它根据当前 notch
+    /// 状态把窗口恢复到正确的事件接收模式。
+    /// - opened: false（按钮可点）
+    /// - closed/popping: true（点击穿透到下层）
+    var restoreIgnoresMouseEventsAfterRepost: (() -> Void)?
+
     override init(
         contentRect: NSRect,
         styleMask style: NSWindow.StyleMask,
@@ -81,9 +88,15 @@ class NotchPanel: NSPanel {
                 let screenLocation = convertPoint(toScreen: locationInWindow)
                 ignoresMouseEvents = true
 
-                // Re-post the event after a tiny delay
+                // Re-post the event after a tiny delay, then恢复 ignoresMouseEvents
+                // 避免窗口被永久卡在忽略状态导致 opened 面板里的按钮失效
                 DispatchQueue.main.async { [weak self] in
-                    self?.repostMouseEvent(event, at: screenLocation)
+                    guard let self = self else { return }
+                    self.repostMouseEvent(event, at: screenLocation)
+                    // 给重投递事件留出穿过窗口的时间，再按当前 notch 状态恢复
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                        self?.restoreIgnoresMouseEventsAfterRepost?()
+                    }
                 }
                 return
             }

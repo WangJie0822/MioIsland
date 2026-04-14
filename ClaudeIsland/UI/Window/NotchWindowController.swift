@@ -101,6 +101,15 @@ class NotchWindowController: NSWindowController {
         // Start with ignoring mouse events (closed state)
         notchWindow.ignoresMouseEvents = true
 
+        // 当 NotchPanel.sendEvent 为穿透点击临时把 ignoresMouseEvents 置为 true 后，
+        // 必须按当前 notch 状态恢复，否则窗口会被永久锁在忽略事件，
+        // 导致 opened 面板里的按钮（如审批 Allow/Deny）完全没响应
+        notchWindow.restoreIgnoresMouseEventsAfterRepost = { [weak notchWindow, weak viewModel] in
+            guard let window = notchWindow else { return }
+            let shouldIgnore = (viewModel?.status != .opened)
+            window.ignoresMouseEvents = shouldIgnore
+        }
+
         // Perform boot animation after a brief delay
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
             self?.viewModel.performBootAnimation()
