@@ -15,7 +15,6 @@ struct ChatView: View {
     let sessionMonitor: ClaudeSessionMonitor
     @ObservedObject var viewModel: NotchViewModel
 
-    @State private var inputText: String = ""
     @State private var history: [ChatHistoryItem] = []
     @State private var session: SessionState
     @State private var isLoading: Bool = true
@@ -91,8 +90,15 @@ struct ChatView: View {
                             ))
                     }
                 } else if session.phase != .ended {
-                    goToTerminalBar
-                        .transition(.opacity)
+                    VStack(spacing: 0) {
+                        ChatQuickReplyBar(
+                            session: session,
+                            isFocused: $isInputFocused,
+                            onEscape: { viewModel.exitChat() }
+                        )
+                        goToTerminalBar
+                    }
+                    .transition(.opacity)
                 }
             }
             // When no content, shrink to fit; when content exists, fill available space
@@ -173,9 +179,6 @@ struct ChatView: View {
                     }
                 }
             }
-        }
-        .onAppear {
-            // No auto-focus needed since input bar is removed
         }
     }
 
@@ -390,16 +393,6 @@ struct ChatView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .background(Color.white.opacity(0.04))
-        .overlay(alignment: .top) {
-            LinearGradient(
-                colors: [fadeColor.opacity(0), fadeColor.opacity(0.7)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .frame(height: 24)
-            .offset(y: -24) // Push above input bar
-            .allowsHitTesting(false)
-        }
         .zIndex(1) // Render above message list
     }
 
