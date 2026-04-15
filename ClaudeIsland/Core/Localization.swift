@@ -178,6 +178,9 @@ enum L10n {
     static var permissionRequest: String { tr("Permission Request", "权限请求") }
     static var goToTerminal: String { tr("Go to Terminal", "前往终端") }
     static var terminal: String { tr("Terminal", "终端") }
+    static var quickReplyPlaceholder: String { tr("Quick reply…", "快速回复…") }
+    static var quickReplySending: String { tr("Sending…", "发送中…") }
+    static var quickReplyError: String { tr("Send failed, retry or go to terminal", "发送失败，请重试或前往终端") }
 
     // MARK: - Session state
 
