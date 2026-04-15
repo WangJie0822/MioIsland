@@ -550,20 +550,31 @@ final class TerminalWriter {
 
     private func sendViaAppleScript(_ text: String, script: String) -> Bool {
         let process = Process()
-        let pipe = Pipe()
+        let outPipe = Pipe()
+        let errPipe = Pipe()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
         process.arguments = ["-e", script]
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
+        process.standardOutput = outPipe
+        process.standardError = errPipe
         do {
             try process.run()
             process.waitUntilExit()
             let success = process.terminationStatus == 0
             if success {
                 Self.logger.info("Sent message via AppleScript")
+                return true
             }
-            return success
+            // 失败路径：把 osascript 的 stderr 写进 DebugLogger，避免再出现"默默失败"时
+            // 还要手动重放脚本才能看到真正错误（例如 error 1002 not allowed to send keystrokes）。
+            let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+            let stderr = String(data: errData, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let detail = stderr.isEmpty ? "(no stderr)" : stderr
+            Self.logger.warning("osascript exit=\(process.terminationStatus) stderr=\(detail, privacy: .public)")
+            DebugLogger.log("TerminalWriter", "osascript failed exit=\(process.terminationStatus) stderr=\(detail)")
+            return false
         } catch {
+            DebugLogger.log("TerminalWriter", "osascript spawn failed: \(error.localizedDescription)")
             return false
         }
     }
