@@ -218,6 +218,13 @@ enum L10n {
         tr("AskUserQuestion · \(count) sub-questions · open terminal to answer",
            "AskUserQuestion · \(count) 个子问题 · 点这里去终端回答")
     }
+    static var accessibilityBannerTitle: String {
+        tr("Accessibility permission missing", "缺少辅助功能权限")
+    }
+    static var accessibilityBannerSubtitle: String {
+        tr("AskUserQuestion / phone sync / image paste will silently fail — tap to open System Settings",
+           "AskUserQuestion / 手机同步 / 图片粘贴会静默失败 · 点这里去系统设置授权")
+    }
     static var interrupted: String { tr("Interrupted", "已中断") }
     static func newMessages(_ count: Int) -> String { tr("\(count) new messages", "\(count) 条新消息") }
     static func runningAgent(_ desc: String?) -> String {

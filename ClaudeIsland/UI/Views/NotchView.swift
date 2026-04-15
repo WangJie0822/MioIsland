@@ -35,6 +35,10 @@ struct NotchView: View {
     @AppStorage("compactCollapsed") private var compactCollapsed: Bool = false
     @ObservedObject private var notchStore: NotchCustomizationStore = .shared
 
+    /// 辅助功能权限状态。每次面板被打开时重查——没有系统通知机制，只能在用户可能
+    /// 看到面板的时刻重查。授权后再次打开面板，横幅自动消失。
+    @State private var isAccessibilityTrusted: Bool = AXIsProcessTrusted()
+
     @Namespace private var activityNamespace
 
     /// Whether any Claude session is currently processing or compacting
@@ -340,17 +344,78 @@ struct NotchView: View {
 
             // Main content only when opened
             if viewModel.status == .opened {
-                contentView
-                    .frame(width: notchSize.width - 24, alignment: .top) // Fixed width to prevent reflow
-                    .transition(
-                        .asymmetric(
-                            insertion: .scale(scale: 0.8, anchor: .top)
-                                .combined(with: .opacity)
-                                .animation(.smooth(duration: 0.35)),
-                            removal: .opacity.animation(.easeOut(duration: 0.15))
-                        )
+                VStack(alignment: .leading, spacing: 6) {
+                    // 辅助功能权限缺失横幅：AskUserQuestion / 同步消息 / 图片粘贴都依赖它，
+                    // 缺就点击无反应；此时挂条显式提示引导用户去系统设置，避免盲猜。
+                    if !isAccessibilityTrusted {
+                        accessibilityPermissionBanner
+                    }
+
+                    contentView
+                }
+                .frame(width: notchSize.width - 24, alignment: .top) // Fixed width to prevent reflow
+                .transition(
+                    .asymmetric(
+                        insertion: .scale(scale: 0.8, anchor: .top)
+                            .combined(with: .opacity)
+                            .animation(.smooth(duration: 0.35)),
+                        removal: .opacity.animation(.easeOut(duration: 0.15))
                     )
+                )
             }
+        }
+        .onAppear {
+            isAccessibilityTrusted = AXIsProcessTrusted()
+        }
+        .onChange(of: viewModel.status) { _, newStatus in
+            if newStatus == .opened {
+                isAccessibilityTrusted = AXIsProcessTrusted()
+            }
+        }
+    }
+
+    // MARK: - Accessibility Permission Banner
+
+    @ViewBuilder
+    private var accessibilityPermissionBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .notchFont(11, weight: .semibold)
+                .foregroundColor(TerminalColors.amber)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(L10n.accessibilityBannerTitle)
+                    .notchFont(10, weight: .semibold)
+                    .foregroundColor(.white.opacity(0.95))
+                    .lineLimit(1)
+                Text(L10n.accessibilityBannerSubtitle)
+                    .notchFont(9)
+                    .foregroundColor(.white.opacity(0.6))
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            Image(systemName: "arrow.up.right.square")
+                .notchFont(11, weight: .medium)
+                .foregroundColor(TerminalColors.amber.opacity(0.8))
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(TerminalColors.amber.opacity(0.12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(TerminalColors.amber.opacity(0.35), lineWidth: 0.8)
+                )
+        )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            DebugLogger.log("Accessibility", "Banner tapped — opening System Settings Accessibility pane")
+            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+                NSWorkspace.shared.open(url)
+            }
+            // 立刻重查一次，给用户点掉横幅的即时反馈（通常仍 false，真正变 true 要等用户在设置里勾）
+            isAccessibilityTrusted = AXIsProcessTrusted()
         }
     }
 
