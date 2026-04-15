@@ -230,7 +230,9 @@ private struct InlineRenderer: View {
                 .strikethrough()
                 .foregroundColor(baseColor)
         } else if inline is SoftBreak {
-            return SwiftUI.Text(" ")
+            // 单行换行视为真正的换行，贴近 Claude 输出（选项列表、步骤）
+            // 的视觉意图；CommonMark 默认折成空格在聊天场景下会把多行选项挤成一段。
+            return SwiftUI.Text("\n")
         } else if inline is LineBreak {
             return SwiftUI.Text("\n")
         } else {
