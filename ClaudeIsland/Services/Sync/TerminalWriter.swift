@@ -44,12 +44,23 @@ final class TerminalWriter {
         }
 
         if termApp.contains("ghostty") {
-            // Ghostty: use keystroke via System Events
+            // Ghostty: 按 cwd 定位目标 terminal 并 focus，再通过 System Events 发送 keystroke。
+            // 不定位会把 keystroke 发到最前的 Ghostty 窗口，多窗口下会串。
+            let escapedText = text.replacingOccurrences(of: "\"", with: "\\\"")
+            let escapedCwd = session.cwd.replacingOccurrences(of: "\"", with: "\\\"")
             return sendViaAppleScript(text, script: """
-                tell application "Ghostty" to activate
+                tell application "Ghostty"
+                    activate
+                    try
+                        set matches to every terminal whose working directory contains "\(escapedCwd)"
+                        if (count of matches) > 0 then
+                            focus (item 1 of matches)
+                        end if
+                    end try
+                end tell
                 delay 0.3
                 tell application "System Events"
-                    keystroke "\(text.replacingOccurrences(of: "\"", with: "\\\""))"
+                    keystroke "\(escapedText)"
                     key code 36
                 end tell
                 """)
