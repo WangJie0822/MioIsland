@@ -9,8 +9,6 @@
 import Combine
 import Foundation
 import os.log
-import CodeLightCrypto
-import CodeLightProtocol
 import SocketIO
 
 /// Connection state for a CodeLight Server
@@ -38,8 +36,6 @@ final class ServerConnection: ObservableObject {
     @Published private(set) var shortCode: String?
     private var manager: SocketManager?
     private var socket: SocketIOClient?
-    private var crypto: MessageCrypto?
-
     /// Called when an RPC request arrives from the phone
     var onRpcCall: ((String, String, @escaping (String) -> Void) -> Void)?
 

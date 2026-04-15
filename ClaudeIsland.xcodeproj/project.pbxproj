@@ -8,8 +8,6 @@
 
 /* Begin PBXBuildFile section */
 		CL00000100000001AABBCC01 /* SocketIO in Frameworks */ = {isa = PBXBuildFile; productRef = CL00000200000002AABBCC02 /* SocketIO */; };
-		CL00000100000003AABBCC03 /* CodeLightProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = CL00000200000004AABBCC04 /* CodeLightProtocol */; };
-		CL00000100000005AABBCC05 /* CodeLightCrypto in Frameworks */ = {isa = PBXBuildFile; productRef = CL00000200000006AABBCC06 /* CodeLightCrypto */; };
 		FDA49F7D2EE11E3C00F9612E /* Markdown in Frameworks */ = {isa = PBXBuildFile; productRef = FD33FD722EDF32D7002A6548 /* Markdown */; };
 /* End PBXBuildFile section */
 
@@ -45,8 +43,6 @@
 			files = (
 				FDA49F7D2EE11E3C00F9612E /* Markdown in Frameworks */,
 				CL00000100000001AABBCC01 /* SocketIO in Frameworks */,
-				CL00000100000003AABBCC03 /* CodeLightProtocol in Frameworks */,
-				CL00000100000005AABBCC05 /* CodeLightCrypto in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -91,8 +87,6 @@
 			packageProductDependencies = (
 				FD33FD722EDF32D7002A6548 /* Markdown */,
 				CL00000200000002AABBCC02 /* SocketIO */,
-				CL00000200000004AABBCC04 /* CodeLightProtocol */,
-				CL00000200000006AABBCC06 /* CodeLightCrypto */,
 			);
 			productName = ClaudeIsland;
 			productReference = FD33FD5D2EDF32D7002A6548 /* Code Island.app */;
@@ -125,8 +119,6 @@
 			packageReferences = (
 				FD33FD712EDF32D7002A6548 /* XCRemoteSwiftPackageReference "swift-markdown" */,
 				CL00000300000007AABBCC07 /* XCRemoteSwiftPackageReference "socket" */,
-				CL00000300000008AABBCC08 /* XCLocalSwiftPackageReference "../CodeLight/packages/CodeLightProtocol" */,
-				CL00000300000009AABBCC09 /* XCLocalSwiftPackageReference "../CodeLight/packages/CodeLightCrypto" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = FD33FD5E2EDF32D7002A6548 /* Products */;
@@ -372,17 +364,6 @@
 		};
 /* End XCConfigurationList section */
 
-/* Begin XCLocalSwiftPackageReference section */
-		CL00000300000008AABBCC08 /* XCLocalSwiftPackageReference "../CodeLight/packages/CodeLightProtocol" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = ../CodeLight/packages/CodeLightProtocol;
-		};
-		CL00000300000009AABBCC09 /* XCLocalSwiftPackageReference "../CodeLight/packages/CodeLightCrypto" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = ../CodeLight/packages/CodeLightCrypto;
-		};
-/* End XCLocalSwiftPackageReference section */
-
 /* Begin XCRemoteSwiftPackageReference section */
 		CL00000300000007AABBCC07 /* XCRemoteSwiftPackageReference "socket" */ = {
 			isa = XCRemoteSwiftPackageReference;
@@ -407,16 +388,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = CL00000300000007AABBCC07 /* XCRemoteSwiftPackageReference "socket" */;
 			productName = SocketIO;
-		};
-		CL00000200000004AABBCC04 /* CodeLightProtocol */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = CL00000300000008AABBCC08 /* XCLocalSwiftPackageReference "../CodeLight/packages/CodeLightProtocol" */;
-			productName = CodeLightProtocol;
-		};
-		CL00000200000006AABBCC06 /* CodeLightCrypto */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = CL00000300000009AABBCC09 /* XCLocalSwiftPackageReference "../CodeLight/packages/CodeLightCrypto" */;
-			productName = CodeLightCrypto;
 		};
 		FD33FD722EDF32D7002A6548 /* Markdown */ = {
 			isa = XCSwiftPackageProductDependency;
