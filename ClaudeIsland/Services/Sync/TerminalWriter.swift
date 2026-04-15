@@ -44,26 +44,7 @@ final class TerminalWriter {
         }
 
         if termApp.contains("ghostty") {
-            // Ghostty: 按 cwd 定位目标 terminal 并 focus，再通过 System Events 发送 keystroke。
-            // 不定位会把 keystroke 发到最前的 Ghostty 窗口，多窗口下会串。
-            let escapedText = text.replacingOccurrences(of: "\"", with: "\\\"")
-            let escapedCwd = session.cwd.replacingOccurrences(of: "\"", with: "\\\"")
-            return sendViaAppleScript(text, script: """
-                tell application "Ghostty"
-                    activate
-                    try
-                        set matches to every terminal whose working directory contains "\(escapedCwd)"
-                        if (count of matches) > 0 then
-                            focus (item 1 of matches)
-                        end if
-                    end try
-                end tell
-                delay 0.3
-                tell application "System Events"
-                    keystroke "\(escapedText)"
-                    key code 36
-                end tell
-                """)
+            return sendViaGhosttyPerformAction(text: text, session: session)
         }
 
         if termApp.contains("terminal") && !termApp.contains("wez") {
@@ -547,6 +528,56 @@ final class TerminalWriter {
     }
 
     // MARK: - AppleScript
+
+    /// Ghostty 专用发送通道：走原生 `perform action "text:..."` AppleScript 命令。
+    ///
+    /// 为什么不走 `System Events keystroke`：keystroke 命令按当前系统输入法状态
+    /// 把字符逐个翻译成虚拟键码，非 ASCII 字符（中文等）会被误翻译成乱码
+    /// （实测中文变成"啊啊啊啊啊"）。
+    ///
+    /// Ghostty 的 `perform action` 接受 `text:<content>` 格式，content 被 Ghostty
+    /// 的 action 层原样写入 pty，原生支持任意 UTF-8 字节。不依赖键盘模拟、
+    /// 不污染剪贴板、不需要把 Ghostty 带到前台——用户在灵动岛里发送后
+    /// Ghostty 仍保持后台，快速回复体验完整。
+    ///
+    /// 换行符处理：AppleScript string literal 不支持 `\n` 转义，多行文本
+    /// 由 `buildGhosttyTextLiteral` 拆成多段 literal 用 `linefeed` 拼接。
+    /// 末尾再追加一个 `linefeed` 作为 Enter 提交给 shell。
+    private func sendViaGhosttyPerformAction(text: String, session: SessionState) -> Bool {
+        let literalExpr = buildGhosttyTextLiteral(text)
+        let escapedCwd = session.cwd
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        let script = """
+            tell application "Ghostty"
+                set matches to every terminal whose working directory contains "\(escapedCwd)"
+                if (count of matches) is 0 then
+                    error "no Ghostty terminal matched cwd"
+                end if
+                set tgt to item 1 of matches
+                focus tgt
+                perform action ("text:" & \(literalExpr) & linefeed) on tgt
+            end tell
+            """
+        return sendViaAppleScript(text, script: script)
+    }
+
+    /// 把 Swift 字符串转换为 AppleScript 字符串 literal 表达式。
+    /// 处理 `"` 和 `\` 的转义；多行文本拆成多段 literal 用 `linefeed` 常量拼接
+    /// （AppleScript literal 不支持 `\n` 转义）。
+    nonisolated private func buildGhosttyTextLiteral(_ text: String) -> String {
+        func escapeASLiteral(_ s: String) -> String {
+            s.replacingOccurrences(of: "\\", with: "\\\\")
+             .replacingOccurrences(of: "\"", with: "\\\"")
+        }
+        let lines = text.components(separatedBy: "\n")
+        if lines.count <= 1 {
+            return "\"\(escapeASLiteral(lines.first ?? ""))\""
+        }
+        return lines
+            .map { "\"\(escapeASLiteral($0))\"" }
+            .joined(separator: " & linefeed & ")
+    }
 
     private func sendViaAppleScript(_ text: String, script: String) -> Bool {
         let process = Process()
