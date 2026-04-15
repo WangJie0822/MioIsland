@@ -817,62 +817,17 @@ struct InstanceRow: View {
 
     // MARK: - AskUserQuestion Response
 
-    /// Send an option selection to the session's terminal
+    /// 把用户选择的选项编号写入会话所在终端。
+    /// 复用 TerminalWriter 统一入口，覆盖 cmux / iTerm2 / Ghostty / Terminal.app 四种终端；
+    /// 任一原因失败时降级为 jump（激活终端窗口，让用户手动输入）。
     private func sendOptionToTerminal(index: Int, session: SessionState) async {
-        let termApp = session.terminalApp?.lowercased() ?? ""
-
-        // Try AppleScript for iTerm2 / Terminal.app / Ghostty
-        if termApp.contains("iterm") {
-            let script = """
-            tell application "iTerm2"
-                tell current session of current tab of current window
-                    write text "\(index)"
-                end tell
-            end tell
-            """
-            if runAppleScript(script) {
-                DebugLogger.log("AskUser", "Sent via iTerm2")
-                return
-            }
-        }
-
-        if termApp.contains("terminal") && !termApp.contains("wez") {
-            let script = """
-            tell application "Terminal"
-                do script "\(index)" in selected tab of front window
-            end tell
-            """
-            if runAppleScript(script) {
-                DebugLogger.log("AskUser", "Sent via Terminal.app")
-                return
-            }
-        }
-
-        // cmux — native AppleScript: send text directly to the terminal
-        guard CmuxTreeParser.isAvailable else {
-            DebugLogger.log("AskUser", "No supported terminal, jumping")
+        DebugLogger.log("AskUser", "Sending '\(index)' via TerminalWriter (term=\(session.terminalApp ?? "?") cwd=\(session.cwd))")
+        let sent = await TerminalWriter.shared.sendText("\(index)", to: session)
+        if sent {
+            DebugLogger.log("AskUser", "Sent successfully")
+        } else {
+            DebugLogger.log("AskUser", "TerminalWriter failed, falling back to jump")
             await TerminalJumper.shared.jump(to: session)
-            return
-        }
-
-        DebugLogger.log("AskUser", "Sending '\(index)' to cmux terminal cwd=\(session.cwd)")
-        let sent = CmuxTreeParser.sendText("\(index)\r", toCwd: session.cwd)
-        DebugLogger.log("AskUser", "Sent: \(sent)")
-    }
-
-    private func runAppleScript(_ script: String) -> Bool {
-        let process = Process()
-        let pipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-e", script]
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-            process.waitUntilExit()
-            return process.terminationStatus == 0
-        } catch {
-            return false
         }
     }
 
