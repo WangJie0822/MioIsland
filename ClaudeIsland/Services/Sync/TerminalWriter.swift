@@ -550,6 +550,10 @@ final class TerminalWriter {
         let escapedCwd = session.cwd
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
+        // 不调用 `focus tgt`：Ghostty 的 `focus` 命令 sdef 明确说"bringing its
+        // window to the front"，会把 Ghostty 抢到前台。`perform action ... on tgt`
+        // 是 targeted 调用，直接写入目标 terminal 的 pty，不依赖焦点状态——
+        // 实测 Finder 在前台时向后台 Ghostty 的 terminal 发 action 依然成功送达。
         let script = """
             tell application "Ghostty"
                 set matches to every terminal whose working directory contains "\(escapedCwd)"
@@ -557,7 +561,6 @@ final class TerminalWriter {
                     error "no Ghostty terminal matched cwd"
                 end if
                 set tgt to item 1 of matches
-                focus tgt
                 perform action ("text:" & \(literalExpr) & return) on tgt
             end tell
             """
