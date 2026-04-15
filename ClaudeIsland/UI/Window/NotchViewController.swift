@@ -9,8 +9,12 @@ import AppKit
 import SwiftUI
 
 /// Custom NSHostingView that passes through clicks on transparent/empty areas.
-class PassThroughHostingView<Content: View>: NSHostingView<Content> {
+final class PassThroughHostingView<Content: View>: NSHostingView<Content> {
     var isOpened: () -> Bool = { false }
+
+    deinit {
+        isOpened = { false }
+    }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         // When opened, let SwiftUI handle all hit testing naturally
