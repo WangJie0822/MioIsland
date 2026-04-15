@@ -558,20 +558,28 @@ struct InstanceRow: View {
     @State private var phaseFlash = false
     @State private var previousPhase: SessionPhase?
 
-    /// Whether the pending tool is AskUserQuestion with options
-    private var askUserOptions: [QuestionOption]? {
+    /// Pending AskUserQuestion 的 `questions` 数组长度。非 AskUserQuestion 或结构不符时返回 nil。
+    private var askUserQuestionCount: Int? {
         guard let toolName = session.pendingToolName, toolName == "AskUserQuestion",
               let input = session.activePermission?.toolInput,
               let questionsValue = input["questions"]?.value as? [[String: Any]] else { return nil }
+        return questionsValue.count
+    }
+
+    /// 单子问题 AskUserQuestion 的 options。
+    /// 复合子问题（`questions.count > 1`）返回 nil——此时岛侧无法跟踪 TUI 当前活跃的 sub-question，
+    /// 发数字等同欺骗性点击；由调用方走跳转终端降级。
+    private var askUserOptions: [QuestionOption]? {
+        guard let toolName = session.pendingToolName, toolName == "AskUserQuestion",
+              let input = session.activePermission?.toolInput,
+              let questionsValue = input["questions"]?.value as? [[String: Any]],
+              questionsValue.count == 1,
+              let opts = questionsValue[0]["options"] as? [[String: Any]] else { return nil }
         var options: [QuestionOption] = []
-        for q in questionsValue {
-            if let opts = q["options"] as? [[String: Any]] {
-                for opt in opts {
-                    let label = opt["label"] as? String ?? ""
-                    let desc = opt["description"] as? String
-                    options.append(QuestionOption(label: label, description: desc))
-                }
-            }
+        for opt in opts {
+            let label = opt["label"] as? String ?? ""
+            let desc = opt["description"] as? String
+            options.append(QuestionOption(label: label, description: desc))
         }
         return options.isEmpty ? nil : options
     }
@@ -718,8 +726,50 @@ struct InstanceRow: View {
                         }
                     }
 
-                    // AskUserQuestion: show options inline
-                    if isWaitingForApproval, let options = askUserOptions {
+                    // AskUserQuestion 复合子问题（>1）：数字快捷键语义不稳定，岛侧无法跟踪 TUI
+                    // 当前活跃的 sub-question，强制降级为"跳转终端"提示，避免 label 和实际选项错位。
+                    if isWaitingForApproval, let qCount = askUserQuestionCount, qCount > 1 {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(L10n.claudeNeedsInput)
+                                .notchFont(9)
+                                .foregroundColor(TerminalColors.amber.opacity(0.7))
+
+                            HStack(spacing: 6) {
+                                Text(L10n.askUserMultiQuestionHint(qCount))
+                                    .notchFont(9, weight: .medium)
+                                    .foregroundColor(.white.opacity(0.8))
+                                    .lineLimit(1)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 4)
+                                            .fill(TerminalColors.amber.opacity(0.15))
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 4)
+                                                    .strokeBorder(TerminalColors.amber.opacity(0.2), lineWidth: 0.5)
+                                            )
+                                    )
+
+                                Image(systemName: "terminal")
+                                    .notchFont(9)
+                                    .foregroundColor(TerminalColors.amber.opacity(0.5))
+                                    .frame(width: 20, height: 20)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 4)
+                                            .fill(TerminalColors.amber.opacity(0.08))
+                                    )
+                            }
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                DebugLogger.log("AskUser", "Multi-question (\(qCount)) jump to terminal")
+                                onFocus()
+                            }
+                        }
+                        .padding(.top, 2)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+                    // AskUserQuestion 单子问题：展示 options 行内按钮
+                    else if isWaitingForApproval, let options = askUserOptions {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(L10n.claudeNeedsInput)
                                 .notchFont(9)

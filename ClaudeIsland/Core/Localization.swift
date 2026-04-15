@@ -214,6 +214,10 @@ enum L10n {
     static var noMessages: String { tr("No messages", "暂无消息") }
     static var processing: String { tr("Processing", "处理中") }
     static var claudeNeedsInput: String { tr("Claude Code needs your input", "Claude Code 需要你的输入") }
+    static func askUserMultiQuestionHint(_ count: Int) -> String {
+        tr("AskUserQuestion · \(count) sub-questions · open terminal to answer",
+           "AskUserQuestion · \(count) 个子问题 · 点这里去终端回答")
+    }
     static var interrupted: String { tr("Interrupted", "已中断") }
     static func newMessages(_ count: Int) -> String { tr("\(count) new messages", "\(count) 条新消息") }
     static func runningAgent(_ desc: String?) -> String {
