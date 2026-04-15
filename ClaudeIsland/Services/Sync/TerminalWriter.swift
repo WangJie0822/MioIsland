@@ -540,9 +540,11 @@ final class TerminalWriter {
     /// 不污染剪贴板、不需要把 Ghostty 带到前台——用户在灵动岛里发送后
     /// Ghostty 仍保持后台，快速回复体验完整。
     ///
-    /// 换行符处理：AppleScript string literal 不支持 `\n` 转义，多行文本
-    /// 由 `buildGhosttyTextLiteral` 拆成多段 literal 用 `linefeed` 拼接。
-    /// 末尾再追加一个 `linefeed` 作为 Enter 提交给 shell。
+    /// 换行符处理：AppleScript string literal 不支持 `\n` 转义。多行文本
+    /// 由 `buildGhosttyTextLiteral` 拆成多段 literal，中间用 `linefeed`（LF）
+    /// 拼接——LF 被 Claude Code TUI 当作输入区内换行保留。末尾追加 `return`
+    /// (CR)，TUI 把 CR 识别为"按了 Enter 键"从而提交当前输入；若这里也用
+    /// `linefeed` 只会在输入区多换一行，内容不会发出去。
     private func sendViaGhosttyPerformAction(text: String, session: SessionState) -> Bool {
         let literalExpr = buildGhosttyTextLiteral(text)
         let escapedCwd = session.cwd
@@ -556,7 +558,7 @@ final class TerminalWriter {
                 end if
                 set tgt to item 1 of matches
                 focus tgt
-                perform action ("text:" & \(literalExpr) & linefeed) on tgt
+                perform action ("text:" & \(literalExpr) & return) on tgt
             end tell
             """
         return sendViaAppleScript(text, script: script)
