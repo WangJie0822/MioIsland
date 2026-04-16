@@ -529,32 +529,65 @@ final class TerminalWriter {
 
     // MARK: - AppleScript
 
-    /// Ghostty 专用发送通道：走原生 `perform action "text:..."` AppleScript 命令。
+    /// Ghostty 专用发送通道：三层递进路由。
+    ///
+    /// Layer 1: ghosttyTerminalId 精准路由（SessionStart 时通过 title-probe 捕获的 UUID）
+    /// Layer 2: 精确 cwd 匹配（is 替代 contains，消除路径子串误匹配）
+    /// Layer 3: contains 兜底（覆盖 symlink/路径规范化不一致等边缘场景）
     ///
     /// 为什么不走 `System Events keystroke`：keystroke 命令按当前系统输入法状态
-    /// 把字符逐个翻译成虚拟键码，非 ASCII 字符（中文等）会被误翻译成乱码
-    /// （实测中文变成"啊啊啊啊啊"）。
+    /// 把字符逐个翻译成虚拟键码，非 ASCII 字符（中文等）会被误翻译成乱码。
     ///
     /// Ghostty 的 `perform action` 接受 `text:<content>` 格式，content 被 Ghostty
     /// 的 action 层原样写入 pty，原生支持任意 UTF-8 字节。不依赖键盘模拟、
-    /// 不污染剪贴板、不需要把 Ghostty 带到前台——用户在灵动岛里发送后
-    /// Ghostty 仍保持后台，快速回复体验完整。
+    /// 不污染剪贴板、不需要把 Ghostty 带到前台。
     ///
-    /// 换行符处理：AppleScript string literal 不支持 `\n` 转义。多行文本
-    /// 由 `buildGhosttyTextLiteral` 拆成多段 literal，中间用 `linefeed`（LF）
-    /// 拼接——LF 被 Claude Code TUI 当作输入区内换行保留。末尾追加 `return`
-    /// (CR)，TUI 把 CR 识别为"按了 Enter 键"从而提交当前输入；若这里也用
-    /// `linefeed` 只会在输入区多换一行，内容不会发出去。
+    /// 换行符处理：多行文本由 `buildGhosttyTextLiteral` 拆成多段 literal，
+    /// 中间用 `linefeed`（LF）拼接。末尾追加 `return`（CR）触发提交。
     private func sendViaGhosttyPerformAction(text: String, session: SessionState) -> Bool {
         let literalExpr = buildGhosttyTextLiteral(text)
+
+        // Layer 1: 按 Ghostty terminal UUID 精准路由
+        if let terminalId = session.ghosttyTerminalId {
+            let escapedId = terminalId
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "\"", with: "\\\"")
+            let script = """
+                tell application "Ghostty"
+                    set tgt to first terminal whose id is "\(escapedId)"
+                    perform action ("text:" & \(literalExpr) & return) on tgt
+                end tell
+                """
+            if sendViaAppleScript(text, script: script) {
+                DebugLogger.log("Sync", "Ghostty: sent via terminal ID \(terminalId.prefix(8))")
+                return true
+            }
+            // ID 失效（terminal 已关闭），降级到 Layer 2
+            DebugLogger.log("Sync", "Ghostty: terminal ID \(terminalId.prefix(8)) stale, falling back to cwd match")
+        }
+
         let escapedCwd = session.cwd
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
-        // 不调用 `focus tgt`：Ghostty 的 `focus` 命令 sdef 明确说"bringing its
-        // window to the front"，会把 Ghostty 抢到前台。`perform action ... on tgt`
-        // 是 targeted 调用，直接写入目标 terminal 的 pty，不依赖焦点状态——
-        // 实测 Finder 在前台时向后台 Ghostty 的 terminal 发 action 依然成功送达。
-        let script = """
+
+        // Layer 2: 精确 cwd 匹配（is 替代 contains）
+        let exactScript = """
+            tell application "Ghostty"
+                set matches to every terminal whose working directory is "\(escapedCwd)"
+                if (count of matches) is 0 then
+                    error "no Ghostty terminal matched exact cwd"
+                end if
+                set tgt to item 1 of matches
+                perform action ("text:" & \(literalExpr) & return) on tgt
+            end tell
+            """
+        if sendViaAppleScript(text, script: exactScript) {
+            DebugLogger.log("Sync", "Ghostty: sent via exact cwd match")
+            return true
+        }
+
+        // Layer 3: contains 兜底（symlink / 路径规范化等边缘场景）
+        let containsScript = """
             tell application "Ghostty"
                 set matches to every terminal whose working directory contains "\(escapedCwd)"
                 if (count of matches) is 0 then
@@ -564,7 +597,13 @@ final class TerminalWriter {
                 perform action ("text:" & \(literalExpr) & return) on tgt
             end tell
             """
-        return sendViaAppleScript(text, script: script)
+        if sendViaAppleScript(text, script: containsScript) {
+            DebugLogger.log("Sync", "Ghostty: sent via contains cwd fallback")
+            return true
+        }
+
+        DebugLogger.log("Sync", "Ghostty: all three layers failed for cwd=\(session.cwd)")
+        return false
     }
 
     /// 把 Swift 字符串转换为 AppleScript 字符串 literal 表达式。
