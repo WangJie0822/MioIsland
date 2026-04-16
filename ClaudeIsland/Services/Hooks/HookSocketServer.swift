@@ -122,6 +122,13 @@ class HookSocketServer {
     private var pendingPermissions: [String: PendingPermission] = [:]
     private let permissionsLock = NSLock()
 
+    /// 定时健康检查
+    private var healthCheckTimer: DispatchSourceTimer?
+    private static let healthCheckInterval: TimeInterval = 60
+
+    /// 累计重启次数
+    private var restartCount = 0
+
     /// Cache tool_use_id from PreToolUse to correlate with PermissionRequest
     /// Key: "sessionId:toolName:serializedInput" -> Queue of tool_use_ids (FIFO)
     /// PermissionRequest events don't include tool_use_id, so we cache from PreToolUse
@@ -202,10 +209,16 @@ class HookSocketServer {
             }
         }
         acceptSource?.resume()
+
+        DebugLogger.log("Socket", "Server started, listening on \(Self.socketPath)")
+        startHealthCheck()
     }
 
     /// Stop the socket server
     func stop() {
+        healthCheckTimer?.cancel()
+        healthCheckTimer = nil
+
         acceptSource?.cancel()
         acceptSource = nil
         unlink(Self.socketPath)
@@ -382,6 +395,83 @@ class HookSocketServer {
         for (_, pending) in allPending {
             close(pending.clientSocket)
             permissionFailureHandler?(pending.sessionId, pending.toolUseId)
+        }
+    }
+
+    /// 启动定时健康检查（在 queue 上调用）
+    private func startHealthCheck() {
+        healthCheckTimer?.cancel()
+
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(
+            deadline: .now() + Self.healthCheckInterval,
+            repeating: Self.healthCheckInterval
+        )
+        timer.setEventHandler { [weak self] in
+            self?.performHealthCheck()
+        }
+        timer.resume()
+        healthCheckTimer = timer
+    }
+
+    /// 自连接测试：尝试连接自己的 socket，失败则重建
+    private func performHealthCheck() {
+        let testSocket = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard testSocket >= 0 else {
+            DebugLogger.log("Socket", "Health check: failed to create test socket")
+            restartServer()
+            return
+        }
+
+        var addr = sockaddr_un()
+        addr.sun_family = sa_family_t(AF_UNIX)
+        Self.socketPath.withCString { ptr in
+            withUnsafeMutablePointer(to: &addr.sun_path) { pathPtr in
+                let pathBufferPtr = UnsafeMutableRawPointer(pathPtr)
+                    .assumingMemoryBound(to: CChar.self)
+                strcpy(pathBufferPtr, ptr)
+            }
+        }
+
+        let connectResult = withUnsafePointer(to: &addr) { ptr in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
+                Darwin.connect(testSocket, sockaddrPtr, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+
+        if connectResult == 0 {
+            // 连接成功，发送 healthcheck 包让 handleClient 过滤掉
+            let payload = "{\"event\":\"__healthcheck__\",\"session_id\":\"_hc\",\"cwd\":\"\",\"status\":\"ok\"}"
+            _ = payload.withCString { ptr in
+                write(testSocket, ptr, strlen(ptr))
+            }
+            close(testSocket)
+            // 健康，不记录日志（避免噪音）
+        } else {
+            close(testSocket)
+            DebugLogger.log("Socket", "Health check failed (errno=\(errno)), restarting server")
+            restartServer()
+        }
+    }
+
+    /// 重建 socket server
+    private func restartServer() {
+        guard let onEvent = eventHandler else {
+            DebugLogger.log("Socket", "Server restart failed: no event handler")
+            return
+        }
+        let onFailure = permissionFailureHandler
+
+        startServer(onEvent: onEvent, onPermissionFailure: onFailure)
+
+        if serverSocket >= 0 {
+            restartCount += 1
+            DebugLogger.log("Socket", "Server restarted successfully (restart #\(restartCount))")
+        } else {
+            DebugLogger.log("Socket", "Server restart failed: startServer did not bind")
+            if restartCount >= 3 {
+                logger.error("Socket server restart failed after \(self.restartCount) previous restarts")
+            }
         }
     }
 
