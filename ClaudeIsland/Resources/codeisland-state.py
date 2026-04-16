@@ -49,6 +49,63 @@ def get_tty():
     return None
 
 
+def probe_ghostty_terminal_id(tty):
+    """在 SessionStart 时通过 title-probe 探测 Ghostty terminal UUID。
+
+    原理：hook 脚本的 stdout 被 Claude Code 管道捕获，但可以直接写入
+    tty 设备路径设置终端标题，然后通过 AppleScript 按标题定位 terminal
+    并取得其唯一 ID。
+
+    仅在 TERM_PROGRAM == "ghostty" 且 tty 可用时执行。
+    """
+    import subprocess
+    import uuid
+    import time
+
+    # 仅 Ghostty 终端执行
+    if os.environ.get("TERM_PROGRAM") != "ghostty":
+        return None
+    if not tty:
+        return None
+
+    nonce = uuid.uuid4().hex[:8]
+
+    # 写 OSC 2 到 tty 设备（绕过被管道捕获的 stdout）
+    try:
+        with open(tty, 'w') as f:
+            f.write(f'\033]2;ci-probe-{nonce}\007')
+            f.flush()
+    except OSError:
+        return None
+
+    # 等 Ghostty 处理转义序列
+    time.sleep(0.05)
+
+    # 查询 Ghostty 找到带 nonce 标题的 terminal
+    terminal_id = None
+    try:
+        result = subprocess.run(
+            ['osascript', '-e',
+             f'tell application "Ghostty" to id of first terminal '
+             f'whose name contains "ci-probe-{nonce}"'],
+            capture_output=True, text=True, timeout=2
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            terminal_id = result.stdout.strip()
+    except Exception:
+        pass
+
+    # 恢复标题（重置为空，shell/Claude Code 会在下次 prompt 时恢复）
+    try:
+        with open(tty, 'w') as f:
+            f.write('\033]2;\007')
+            f.flush()
+    except OSError:
+        pass
+
+    return terminal_id
+
+
 def send_event(state):
     """Send event to app, return response if any"""
     try:
@@ -182,6 +239,10 @@ def main():
     elif event == "SessionStart":
         # New session starts waiting for user input
         state["status"] = "waiting_for_input"
+        # 探测 Ghostty terminal ID（仅 Ghostty + 有 tty 时执行）
+        ghostty_id = probe_ghostty_terminal_id(tty)
+        if ghostty_id:
+            state["ghostty_terminal_id"] = ghostty_id
 
     elif event == "SessionEnd":
         state["status"] = "ended"
