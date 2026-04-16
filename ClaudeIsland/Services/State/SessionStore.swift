@@ -166,6 +166,10 @@ actor SessionStore {
                 session.isBackground = false
             }
         }
+        if let ghosttyId = event.ghosttyTerminalId {
+            session.ghosttyTerminalId = ghosttyId
+            DebugLogger.log("Hook", "Ghostty terminal ID captured: \(ghosttyId.prefix(8))")
+        }
         session.lastActivity = Date()
 
         if event.status == "ended" {
@@ -228,6 +232,7 @@ actor SessionStore {
             tty: tty,
             isInTmux: false,  // Will be updated
             isBackground: tty == nil,
+            ghosttyTerminalId: event.ghosttyTerminalId,
             phase: .idle
         )
     }
