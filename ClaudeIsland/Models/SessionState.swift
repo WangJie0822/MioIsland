@@ -26,6 +26,9 @@ struct SessionState: Equatable, Identifiable, Sendable {
     var terminalApp: String?
     /// 后台会话（claude -p 等无 TTY 的进程），不在主列表展示
     var isBackground: Bool
+    /// Ghostty terminal UUID，SessionStart 时通过 title-probe 捕获，
+    /// 发送时用于精准路由，避免 cwd 匹配歧义。
+    var ghosttyTerminalId: String?
 
     // MARK: - State Machine
 
@@ -77,6 +80,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
         isInTmux: Bool = false,
         terminalApp: String? = nil,
         isBackground: Bool = false,
+        ghosttyTerminalId: String? = nil,
         phase: SessionPhase = .idle,
         chatItems: [ChatHistoryItem] = [],
         toolTracker: ToolTracker = ToolTracker(),
@@ -97,6 +101,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
         self.isInTmux = isInTmux
         self.terminalApp = terminalApp
         self.isBackground = isBackground
+        self.ghosttyTerminalId = ghosttyTerminalId
         self.phase = phase
         self.chatItems = chatItems
         self.toolTracker = toolTracker
