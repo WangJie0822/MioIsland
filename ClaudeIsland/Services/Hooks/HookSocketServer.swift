@@ -138,7 +138,10 @@ class HookSocketServer {
     }
 
     private func startServer(onEvent: @escaping HookEventHandler, onPermissionFailure: PermissionFailureHandler?) {
-        guard serverSocket < 0 else { return }
+        // 若已在运行，先完整清理再重建
+        if serverSocket >= 0 {
+            teardownServer()
+        }
 
         eventHandler = onEvent
         permissionFailureHandler = onPermissionFailure
@@ -355,6 +358,30 @@ class HookSocketServer {
 
         if !keysToRemove.isEmpty {
             logger.debug("Cleaned up \(keysToRemove.count) cache entries for session \(sessionId.prefix(8), privacy: .public)")
+        }
+    }
+
+    /// 完整清理 socket server 资源（在 queue 上调用）
+    private func teardownServer() {
+        acceptSource?.cancel()
+        acceptSource = nil
+
+        if serverSocket >= 0 {
+            close(serverSocket)
+            serverSocket = -1
+        }
+
+        unlink(Self.socketPath)
+
+        // 关闭所有 pending permission 的 client socket 并通知失败
+        permissionsLock.lock()
+        let allPending = pendingPermissions
+        pendingPermissions.removeAll()
+        permissionsLock.unlock()
+
+        for (_, pending) in allPending {
+            close(pending.clientSocket)
+            permissionFailureHandler?(pending.sessionId, pending.toolUseId)
         }
     }
 
