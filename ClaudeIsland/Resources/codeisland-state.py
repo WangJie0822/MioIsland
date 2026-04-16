@@ -124,7 +124,16 @@ def send_event(state):
             sock.close()
 
         return None
-    except (socket.error, OSError, json.JSONDecodeError):
+    except (socket.error, OSError) as e:
+        if isinstance(e, ConnectionRefusedError):
+            msg = "socket server not responding"
+        elif isinstance(e, FileNotFoundError):
+            msg = "Code Island not running"
+        else:
+            msg = str(e)
+        print(f"[codeisland-hook] {msg}", file=sys.stderr)
+        return None
+    except json.JSONDecodeError:
         return None
 
 
