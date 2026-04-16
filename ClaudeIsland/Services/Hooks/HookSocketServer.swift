@@ -414,6 +414,12 @@ class HookSocketServer {
             return
         }
 
+        // 健康检查事件：直接关闭连接，不传递给业务逻辑
+        if event.event == "__healthcheck__" {
+            close(clientSocket)
+            return
+        }
+
         logger.debug("Received: \(event.event, privacy: .public) for \(event.sessionId.prefix(8), privacy: .public)")
 
         if event.event == "PreToolUse" {
