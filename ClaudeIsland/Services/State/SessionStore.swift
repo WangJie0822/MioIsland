@@ -161,6 +161,10 @@ actor SessionStore {
         }
         if let tty = event.tty {
             session.tty = tty.replacingOccurrences(of: "/dev/", with: "")
+            // 后续事件带了 TTY，则从后台提升为交互式
+            if session.isBackground {
+                session.isBackground = false
+            }
         }
         session.lastActivity = Date()
 
@@ -215,13 +219,15 @@ actor SessionStore {
     }
 
     private func createSession(from event: HookEvent) -> SessionState {
-        SessionState(
+        let tty = event.tty?.replacingOccurrences(of: "/dev/", with: "")
+        return SessionState(
             sessionId: event.sessionId,
             cwd: event.cwd,
             projectName: URL(fileURLWithPath: event.cwd).lastPathComponent,
             pid: event.pid,
-            tty: event.tty?.replacingOccurrences(of: "/dev/", with: ""),
+            tty: tty,
             isInTmux: false,  // Will be updated
+            isBackground: tty == nil,
             phase: .idle
         )
     }
@@ -910,10 +916,12 @@ actor SessionStore {
         zombieScanTask = nil
     }
 
-    /// Check all non-ended sessions for dead processes
+    /// Check all non-ended sessions for dead processes, and clean up stale ended background sessions
     func scanForZombies() {
         var changed = false
         var zombieSessionIds: [String] = []
+
+        // 1. 检测僵尸进程
         for (sessionId, session) in sessions {
             guard session.phase != .ended else { continue }
             guard let pid = session.pid else { continue }
@@ -925,6 +933,15 @@ actor SessionStore {
                 changed = true
             }
         }
+
+        // 2. 自动清理已结束的后台会话（无需用户手动归档）
+        let staleBackgroundIds = sessions.filter { $0.value.isBackground && $0.value.phase == .ended }.map(\.key)
+        for id in staleBackgroundIds {
+            sessions.removeValue(forKey: id)
+            cancelPendingSync(sessionId: id)
+            changed = true
+        }
+
         if changed {
             // Clean up HookSocketServer pending permissions and interrupt watchers
             // (mirrors the cleanup that normal Stop/ended hook events perform)

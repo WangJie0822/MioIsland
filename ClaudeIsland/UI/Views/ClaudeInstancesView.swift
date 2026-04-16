@@ -15,6 +15,8 @@ struct ClaudeInstancesView: View {
 
     /// Tracks which project groups are collapsed, keyed by group id (cwd path)
     @State private var collapsedGroups: Set<String> = []
+    /// 后台会话区域是否折叠
+    @State private var isBackgroundCollapsed: Bool = true
     /// Whether to show grouped by project or flat list (default: flat)
     @AppStorage("showGroupedSessions") private var showGrouped: Bool = false
     @ObservedObject private var buddyReader = BuddyReader.shared
@@ -22,15 +24,20 @@ struct ClaudeInstancesView: View {
     @AppStorage("usePixelCat") private var usePixelCat: Bool = false
     @ObservedObject private var notchStore: NotchCustomizationStore = .shared
 
+    /// 后台会话（claude -p 等无 TTY 进程）
+    private var backgroundInstances: [SessionState] {
+        SessionFilter.backgroundSessions(sessionMonitor.instances)
+    }
+
     var body: some View {
         if sessionMonitor.instances.isEmpty {
             emptyState
         } else {
             ZStack(alignment: .bottomTrailing) {
                 VStack(spacing: 0) {
-                    // Top bar: session count + settings
+                    // Top bar: session count + settings (只统计交互式会话)
                     HStack {
-                        Text("\(sessionMonitor.instances.count) \(L10n.sessions)")
+                        Text("\(sortedInstances.count) \(L10n.sessions)")
                             .notchFont(11)
                             .notchSecondaryForeground()
                         Spacer()
@@ -92,8 +99,9 @@ struct ClaudeInstancesView: View {
                 }
             }
             .onReceive(sessionMonitor.$instances) { instances in
-                viewModel.sessionCount = instances.count
-                viewModel.activeSessionCount = instances.filter {
+                let interactive = SessionFilter.filterForDisplay(instances)
+                viewModel.sessionCount = interactive.count
+                viewModel.activeSessionCount = interactive.filter {
                     $0.phase != .idle && $0.phase != .ended
                 }.count
             }
@@ -267,8 +275,9 @@ struct ClaudeInstancesView: View {
     // MARK: - Stats
 
     /// Total minutes across all sessions
+    /// 只统计交互式会话时长
     private var totalSessionMinutes: Int {
-        sessionMonitor.instances.reduce(0) { total, session in
+        sortedInstances.reduce(0) { total, session in
             total + Int(Date().timeIntervalSince(session.createdAt) / 60)
         }
     }
@@ -401,6 +410,11 @@ struct ClaudeInstancesView: View {
                         .padding(.top, 8)
                         .padding(.bottom, 4)
                 }
+
+                // 后台会话折叠区域
+                if !backgroundInstances.isEmpty {
+                    backgroundSection
+                }
             }
             .padding(.horizontal, 2)
             .padding(.vertical, 2)
@@ -444,6 +458,59 @@ struct ClaudeInstancesView: View {
             .padding(.vertical, 2)
         }
         .scrollBounceBehavior(.basedOnSize)
+    }
+
+    // MARK: - Background Sessions
+
+    private var backgroundSection: some View {
+        VStack(spacing: 0) {
+            // 分隔线
+            LinearGradient(
+                colors: [.clear, .white.opacity(0.08), .clear],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+            .frame(height: 1)
+            .padding(.horizontal, 12)
+            .padding(.top, 4)
+
+            // 折叠头部
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isBackgroundCollapsed.toggle()
+                }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: isBackgroundCollapsed ? "chevron.right" : "chevron.down")
+                        .notchFont(8, weight: .medium)
+                        .notchSecondaryForeground()
+                        .frame(width: 10)
+
+                    Image(systemName: "gearshape.2")
+                        .notchFont(9)
+                        .foregroundColor(.white.opacity(0.3))
+
+                    Text(L10n.backgroundSessions(backgroundInstances.count))
+                        .notchFont(10, weight: .medium)
+                        .notchSecondaryForeground()
+
+                    Spacer()
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            // 展开后的后台会话列表
+            if !isBackgroundCollapsed {
+                ForEach(backgroundInstances) { session in
+                    BackgroundSessionRow(session: session) {
+                        archiveSession(session)
+                    }
+                }
+            }
+        }
     }
 
     // MARK: - Actions
@@ -1005,6 +1072,72 @@ struct InstanceRow: View {
                     .lineLimit(1)
             }
         }
+    }
+}
+
+// MARK: - Background Session Row
+
+/// 后台会话的精简行（无 buddy icon、无审批按钮）
+struct BackgroundSessionRow: View {
+    let session: SessionState
+    let onArchive: () -> Void
+
+    private var phaseColor: Color {
+        switch session.phase {
+        case .processing, .compacting: return Color(red: 0.4, green: 0.91, blue: 0.98)
+        case .waitingForApproval: return Color(red: 0.96, green: 0.62, blue: 0.04)
+        case .waitingForInput: return Color(red: 0.29, green: 0.87, blue: 0.5)
+        case .idle, .ended: return Color.white.opacity(0.2)
+        }
+    }
+
+    private var durationText: String {
+        let elapsed = Date().timeIntervalSince(session.createdAt)
+        let minutes = Int(elapsed / 60)
+        if minutes < 1 { return "<1m" }
+        if minutes < 60 { return "\(minutes)m" }
+        return "\(minutes / 60)h"
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            // 状态点
+            Circle()
+                .fill(phaseColor)
+                .frame(width: 5, height: 5)
+
+            // 项目名
+            Text(session.projectName)
+                .notchFont(9, weight: .medium)
+                .opacity(0.6)
+                .lineLimit(1)
+
+            // 摘要（如有）
+            if session.displayTitle != session.projectName {
+                Text(session.displayTitle)
+                    .notchFont(9)
+                    .opacity(0.35)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+
+            // 时长
+            Text(durationText)
+                .notchFont(9)
+                .opacity(0.25)
+
+            // 删除
+            Image(systemName: "xmark")
+                .notchFont(7, weight: .medium)
+                .notchSecondaryForeground()
+                .frame(width: 14, height: 14)
+                .contentShape(Rectangle())
+                .onTapGesture { onArchive() }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .opacity(session.phase == .ended ? 0.4 : 0.7)
     }
 }
 

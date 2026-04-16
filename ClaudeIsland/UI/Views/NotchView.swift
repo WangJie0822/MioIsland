@@ -43,21 +43,21 @@ struct NotchView: View {
 
     /// Whether any Claude session is currently processing or compacting
     private var isAnyProcessing: Bool {
-        sessionMonitor.instances.contains { $0.phase == .processing || $0.phase == .compacting }
+        sessionMonitor.instances.contains { !$0.isBackground && ($0.phase == .processing || $0.phase == .compacting) }
     }
 
-    /// Whether any Claude session has a pending permission request
+    /// Whether any interactive session has a pending permission request
     private var hasPendingPermission: Bool {
-        sessionMonitor.instances.contains { $0.phase.isWaitingForApproval }
+        sessionMonitor.instances.contains { !$0.isBackground && $0.phase.isWaitingForApproval }
     }
 
-    /// Whether any Claude session is waiting for user input (done/ready state) within the display window
+    /// Whether any interactive session is waiting for user input (done/ready state) within the display window
     private var hasWaitingForInput: Bool {
         let now = Date()
         let displayDuration: TimeInterval = 30  // Show checkmark for 30 seconds
 
         return sessionMonitor.instances.contains { session in
-            guard session.phase == .waitingForInput else { return false }
+            guard !session.isBackground, session.phase == .waitingForInput else { return false }
             // Only show if within the 30-second display window
             if let enteredAt = waitingForInputTimestamps[session.stableId] {
                 return now.timeIntervalSince(enteredAt) < displayDuration
@@ -66,16 +66,16 @@ struct NotchView: View {
         }
     }
 
-    /// Whether there are any active (non-ended) sessions
+    /// Whether there are any active (non-ended) interactive sessions
     private var hasActiveSessions: Bool {
-        sessionMonitor.instances.contains { $0.phase != .ended }
+        sessionMonitor.instances.contains { !$0.isBackground && $0.phase != .ended }
     }
 
-    /// The most urgent animation state across all active sessions.
+    /// The most urgent animation state across all active interactive sessions.
     /// Priority: needsYou > error > working > thinking > done > idle
     private var mostUrgentAnimationState: AnimationState {
         var best: AnimationState = .idle
-        for session in sessionMonitor.instances {
+        for session in sessionMonitor.instances where !session.isBackground {
             let state = session.phase.animationState
             if animationPriority(state) > animationPriority(best) {
                 best = state
@@ -96,10 +96,10 @@ struct NotchView: View {
         }
     }
 
-    /// The highest-priority session: urgent states first, then most recently active
+    /// The highest-priority interactive session: urgent states first, then most recently active
     private var highestPrioritySession: SessionState? {
         sessionMonitor.instances
-            .filter { $0.phase != .ended }
+            .filter { !$0.isBackground && $0.phase != .ended }
             .max { a, b in
                 let pa = animationPriority(a.phase.animationState)
                 let pb = animationPriority(b.phase.animationState)
@@ -271,7 +271,7 @@ struct NotchView: View {
                             autoCollapseTimer = nil
                         } else if autoCollapseOnMouseLeave && viewModel.status == .opened {
                             // Mouse left: start 1.5s countdown unless waiting for approval
-                            let hasApprovalPending = sessionMonitor.instances.contains { $0.phase.isWaitingForApproval }
+                            let hasApprovalPending = sessionMonitor.instances.contains { !$0.isBackground && $0.phase.isWaitingForApproval }
                             if !hasApprovalPending {
                                 let workItem = DispatchWorkItem { [self] in
                                     if !isHovering && viewModel.status == .opened {
@@ -432,7 +432,7 @@ struct NotchView: View {
             } else if hasActiveSessions {
                 // Closed with sessions: Dynamic Island style content
                 CollapsedNotchContent(
-                    sessions: sessionMonitor.instances,
+                    sessions: sessionMonitor.instances.filter { !$0.isBackground },
                     mostUrgentState: mostUrgentAnimationState,
                     activityTextParts: activityTextParts,
                     notchHeight: closedNotchSize.height,
@@ -571,8 +571,8 @@ struct NotchView: View {
     }
 
     private func handleWaitingForInputChange(_ instances: [SessionState]) {
-        // Get sessions that are now waiting for input
-        let waitingForInputSessions = instances.filter { $0.phase == .waitingForInput }
+        // Get interactive sessions that are now waiting for input
+        let waitingForInputSessions = instances.filter { !$0.isBackground && $0.phase == .waitingForInput }
         let currentIds = Set(waitingForInputSessions.map { $0.stableId })
         let newWaitingIds = currentIds.subtracting(previousWaitingForInputIds)
 

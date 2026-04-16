@@ -9,16 +9,21 @@
 import Foundation
 
 enum SessionFilter {
-    /// Filter sessions for display: hide rate-limit noise (ended sessions that ran < 30s).
-    /// Ended sessions that ran >= 30s are kept and shown with "Ended" visual state.
+    /// 过滤交互式会话用于主列表：排除后台会话，隐藏短命 ended 会话噪音
     static func filterForDisplay(_ sessions: [SessionState]) -> [SessionState] {
         sessions.filter { session in
+            // 后台会话不在主列表展示
+            if session.isBackground { return false }
             if session.phase == .ended {
-                // Rate-limit noise: short-lived sessions that ended quickly
                 let duration = Date().timeIntervalSince(session.createdAt)
                 return duration >= 30
             }
             return true
         }
+    }
+
+    /// 后台会话列表（claude -p 等无 TTY 进程）
+    static func backgroundSessions(_ sessions: [SessionState]) -> [SessionState] {
+        sessions.filter { $0.isBackground }
     }
 }

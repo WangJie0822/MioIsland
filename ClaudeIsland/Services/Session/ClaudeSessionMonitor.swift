@@ -131,7 +131,7 @@ class ClaudeSessionMonitor: ObservableObject {
 
     private func updateFromSessions(_ sessions: [SessionState]) {
         instances = sessions
-        pendingInstances = sessions.filter { $0.needsAttention }
+        pendingInstances = sessions.filter { !$0.isBackground && $0.needsAttention }
 
         // Eagerly parse conversationInfo for sessions missing it
         for session in sessions where session.conversationInfo.firstUserMessage == nil {

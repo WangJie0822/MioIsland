@@ -24,6 +24,8 @@ struct SessionState: Equatable, Identifiable, Sendable {
     var isInTmux: Bool
     /// Detected terminal app name (e.g., "Ghostty", "Warp", "iTerm2", "cmux", "Terminal")
     var terminalApp: String?
+    /// 后台会话（claude -p 等无 TTY 的进程），不在主列表展示
+    var isBackground: Bool
 
     // MARK: - State Machine
 
@@ -74,6 +76,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
         tty: String? = nil,
         isInTmux: Bool = false,
         terminalApp: String? = nil,
+        isBackground: Bool = false,
         phase: SessionPhase = .idle,
         chatItems: [ChatHistoryItem] = [],
         toolTracker: ToolTracker = ToolTracker(),
@@ -93,6 +96,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
         self.tty = tty
         self.isInTmux = isInTmux
         self.terminalApp = terminalApp
+        self.isBackground = isBackground
         self.phase = phase
         self.chatItems = chatItems
         self.toolTracker = toolTracker
