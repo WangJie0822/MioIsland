@@ -72,16 +72,14 @@ class NotchWindowController: NSWindowController {
 
         notchWindow.setFrame(windowFrame, display: true)
 
-        // Dynamically toggle mouse event handling based on notch state:
-        // - Closed: ignoresMouseEvents = true (clicks pass through to menu bar/apps)
-        // - Opened: ignoresMouseEvents = false (buttons inside panel work)
+        // Status sink：仅负责 opened 时的窗口焦点管理；ignoresMouseEvents 的切换
+        // 交由下面的 CombineLatest(status, isMouseInsideInteractiveArea) 统一处理，
+        // 让展开态下鼠标位于面板外时，点击/滚轮/右键/拖拽直接穿透到下层 App。
         viewModel.$status
             .receive(on: DispatchQueue.main)
             .sink { [weak notchWindow, weak viewModel] status in
                 switch status {
                 case .opened:
-                    // Accept mouse events when opened so buttons work
-                    notchWindow?.ignoresMouseEvents = false
                     notchWindow?.acceptsMouseMovedEvents = true
                     // Only steal focus on user-initiated opens (click)
                     // Hover/notification opens should not interrupt typing in other apps
@@ -92,23 +90,35 @@ class NotchWindowController: NSWindowController {
                         notchWindow?.orderFrontRegardless()
                     }
                 case .closed, .popping:
-                    // Ignore mouse events when closed so clicks pass through
-                    notchWindow?.ignoresMouseEvents = true
+                    break
+                }
+            }
+            .store(in: &cancellables)
+
+        // 动态 ignoresMouseEvents：
+        // - closed / popping：恒 true（事件穿透到菜单栏/下层 App，维持现状）
+        // - opened + 鼠标在面板内：false（按钮可点）
+        // - opened + 鼠标在面板外：true（点击/滚轮/右键/拖拽穿透到下层 App）
+        Publishers.CombineLatest(viewModel.$status, viewModel.$isMouseInsideInteractiveArea)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak notchWindow] status, insideInteractive in
+                let shouldIgnore: Bool = {
+                    switch status {
+                    case .opened:
+                        return !insideInteractive
+                    case .closed, .popping:
+                        return true
+                    }
+                }()
+                guard let window = notchWindow else { return }
+                if window.ignoresMouseEvents != shouldIgnore {
+                    window.ignoresMouseEvents = shouldIgnore
                 }
             }
             .store(in: &cancellables)
 
         // Start with ignoring mouse events (closed state)
         notchWindow.ignoresMouseEvents = true
-
-        // 当 NotchPanel.sendEvent 为穿透点击临时把 ignoresMouseEvents 置为 true 后，
-        // 必须按当前 notch 状态恢复，否则窗口会被永久锁在忽略事件，
-        // 导致 opened 面板里的按钮（如审批 Allow/Deny）完全没响应
-        notchWindow.restoreIgnoresMouseEventsAfterRepost = { [weak notchWindow, weak viewModel] in
-            guard let window = notchWindow else { return }
-            let shouldIgnore = (viewModel?.status != .opened)
-            window.ignoresMouseEvents = shouldIgnore
-        }
 
         // Perform boot animation after a brief delay
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in

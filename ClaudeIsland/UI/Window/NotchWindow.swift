@@ -11,13 +11,6 @@ import AppKit
 
 // Use NSPanel subclass for non-activating behavior
 class NotchPanel: NSPanel {
-    /// 由 NotchWindowController 注入：当 sendEvent 为了点击穿透临时把
-    /// `ignoresMouseEvents` 置为 true 后，必须由它根据当前 notch
-    /// 状态把窗口恢复到正确的事件接收模式。
-    /// - opened: false（按钮可点）
-    /// - closed/popping: true（点击穿透到下层）
-    var restoreIgnoresMouseEventsAfterRepost: (() -> Void)?
-
     override init(
         contentRect: NSRect,
         styleMask style: NSWindow.StyleMask,
@@ -70,65 +63,4 @@ class NotchPanel: NSPanel {
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
-
-    // MARK: - Click-through for areas outside the panel content
-
-    override func sendEvent(_ event: NSEvent) {
-        // For mouse events, check if we should pass through
-        if event.type == .leftMouseDown || event.type == .leftMouseUp ||
-           event.type == .rightMouseDown || event.type == .rightMouseUp {
-            // Get the location in window coordinates
-            let locationInWindow = event.locationInWindow
-
-            // Check if any view wants to handle this event
-            if let contentView = self.contentView,
-               contentView.hitTest(locationInWindow) == nil {
-                // No view wants this event - pass it through to windows behind
-                // by temporarily ignoring mouse events and re-posting
-                let screenLocation = convertPoint(toScreen: locationInWindow)
-                ignoresMouseEvents = true
-
-                // Re-post the event after a tiny delay, then恢复 ignoresMouseEvents
-                // 避免窗口被永久卡在忽略状态导致 opened 面板里的按钮失效
-                DispatchQueue.main.async { [weak self] in
-                    guard let self = self else { return }
-                    self.repostMouseEvent(event, at: screenLocation)
-                    // 给重投递事件留出穿过窗口的时间，再按当前 notch 状态恢复
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-                        self?.restoreIgnoresMouseEventsAfterRepost?()
-                    }
-                }
-                return
-            }
-        }
-
-        super.sendEvent(event)
-    }
-
-    private func repostMouseEvent(_ event: NSEvent, at screenLocation: NSPoint) {
-        // Convert to CGEvent coordinate system (Y from top of screen)
-        guard let screen = NSScreen.main else { return }
-        let screenHeight = screen.frame.height
-        let cgPoint = CGPoint(x: screenLocation.x, y: screenHeight - screenLocation.y)
-
-        let mouseType: CGEventType
-        switch event.type {
-        case .leftMouseDown: mouseType = .leftMouseDown
-        case .leftMouseUp: mouseType = .leftMouseUp
-        case .rightMouseDown: mouseType = .rightMouseDown
-        case .rightMouseUp: mouseType = .rightMouseUp
-        default: return
-        }
-
-        let mouseButton: CGMouseButton = event.type == .rightMouseDown || event.type == .rightMouseUp ? .right : .left
-
-        if let cgEvent = CGEvent(
-            mouseEventSource: nil,
-            mouseType: mouseType,
-            mouseCursorPosition: cgPoint,
-            mouseButton: mouseButton
-        ) {
-            cgEvent.post(tap: .cghidEventTap)
-        }
-    }
 }

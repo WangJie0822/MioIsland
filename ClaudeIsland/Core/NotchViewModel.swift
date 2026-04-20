@@ -46,6 +46,13 @@ class NotchViewModel: ObservableObject {
     @Published var contentType: NotchContentType = .instances
     @Published var isHovering: Bool = false
 
+    /// 鼠标当前是否位于窗口应接收事件的区域：
+    /// - opened 态：位于面板矩形内（含 notch 本体）
+    /// - closed / popping 态：位于 notch 本体或 wings 区域
+    /// NotchWindowController 订阅该信号与 $status 合并驱动 notchWindow.ignoresMouseEvents，
+    /// 实现展开态下面板外点击/滚轮/右键/拖拽直接穿透到下层 App。
+    @Published var isMouseInsideInteractiveArea: Bool = false
+
     /// Session counts for dynamic panel sizing
     @Published var sessionCount: Int = 0
     @Published var activeSessionCount: Int = 0
@@ -175,8 +182,11 @@ class NotchViewModel: ObservableObject {
     // MARK: - Event Handling
 
     private func setupEventHandlers() {
+        // 不再 throttle：flag 切换必须紧跟鼠标位置，否则鼠标飞入面板的首次点击会穿透。
+        // AppKit 已对 mouseMoved 事件做 ≤60Hz 合并；hover 逻辑靠
+        // `guard newHovering != isHovering` 去重，不依赖这里的 throttle。
         events.mouseLocation
-            .throttle(for: .milliseconds(50), scheduler: DispatchQueue.main, latest: true)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] location in
                 self?.handleMouseMove(location)
             }
@@ -222,6 +232,10 @@ class NotchViewModel: ObservableObject {
         // away the alignment of the dashed editing frame.
         if NotchCustomizationStore.shared.isEditing {
             isHovering = false
+            // live edit 期间 notch window 应完全穿透，让编辑覆盖层独占交互
+            if isMouseInsideInteractiveArea {
+                isMouseInsideInteractiveArea = false
+            }
             hoverTimer?.cancel()
             hoverTimer = nil
             return
@@ -239,6 +253,12 @@ class NotchViewModel: ObservableObject {
         )
 
         let newHovering = inNotch || inOpened
+
+        // 同步给 NotchWindowController 驱动 ignoresMouseEvents 切换。
+        // 放在 hover 早退前更新，避免 hover 值无变化时漏发信号。
+        if newHovering != isMouseInsideInteractiveArea {
+            isMouseInsideInteractiveArea = newHovering
+        }
 
         // Only update if changed to prevent unnecessary re-renders
         guard newHovering != isHovering else { return }
@@ -272,45 +292,14 @@ class NotchViewModel: ObservableObject {
         let offset = currentHorizontalOffset
         switch status {
         case .opened:
-            // Close if click is outside the panel content area
+            // 展开态下 `ignoresMouseEvents` 在鼠标离开面板矩形时已被动态置 true，
+            // 面板外的点击事件由下层 App 直接接收，本分支仅负责收起面板。
             if geometry.isPointOutsidePanel(location, size: openedSize, horizontalOffset: offset) {
                 notchClose()
-                repostClickAt(location)
             }
         case .closed, .popping:
             if geometry.isPointInNotch(location, expansionWidth: currentExpansionWidth, horizontalOffset: offset) {
                 notchOpen(reason: .click)
-            }
-        }
-    }
-
-    /// Re-posts a mouse click at the given screen location so it reaches windows behind us
-    private func repostClickAt(_ location: CGPoint) {
-        // Small delay to let the window's ignoresMouseEvents update
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            // Convert to CGEvent coordinate system (screen coordinates with Y from top-left)
-            guard let screen = NSScreen.main else { return }
-            let screenHeight = screen.frame.height
-            let cgPoint = CGPoint(x: location.x, y: screenHeight - location.y)
-
-            // Create and post mouse down event
-            if let mouseDown = CGEvent(
-                mouseEventSource: nil,
-                mouseType: .leftMouseDown,
-                mouseCursorPosition: cgPoint,
-                mouseButton: .left
-            ) {
-                mouseDown.post(tap: .cghidEventTap)
-            }
-
-            // Create and post mouse up event
-            if let mouseUp = CGEvent(
-                mouseEventSource: nil,
-                mouseType: .leftMouseUp,
-                mouseCursorPosition: cgPoint,
-                mouseButton: .left
-            ) {
-                mouseUp.post(tap: .cghidEventTap)
             }
         }
     }
