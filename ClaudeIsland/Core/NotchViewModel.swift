@@ -58,6 +58,13 @@ class NotchViewModel: ObservableObject {
     @Published var activeSessionCount: Int = 0
     @Published var isInstancesExpanded: Bool = false
 
+    /// NotchView 通过 GeometryReader + `.task(id:)` 上报的实际渲染面板高度。
+    /// openedSize.height 是"最大高度上限"（尤其是 chat 的 580），
+    /// 但内容自适应后实际可能远小于此值——若 hit-test 仍按上限算，
+    /// 视觉面板外、逻辑面板内的点击会被拦截（面板不关、点击不穿透）。
+    /// 这里保存实测值，openedSize 在 > 0 且 < 上限时采用它。
+    @Published var measuredOpenedHeight: CGFloat = 0
+
     // MARK: - Dependencies
 
     private let screenSelector = ScreenSelector.shared
@@ -103,8 +110,20 @@ class NotchViewModel: ObservableObject {
         }
     }
 
-    /// Dynamic opened size based on content type
+    /// Dynamic opened size based on content type.
+    /// 若 NotchView 已测出实际渲染高度（`measuredOpenedHeight`），采用实测值替换
+    /// 上限值——这样 hit-test 和 isPointOutsidePanel 用的是视觉面板真实底边，
+    /// 而不是面板向下延伸的不可见"逻辑区域"。
     var openedSize: CGSize {
+        let base = baseOpenedSize
+        if measuredOpenedHeight > 0 && measuredOpenedHeight < base.height {
+            return CGSize(width: base.width, height: measuredOpenedHeight)
+        }
+        return base
+    }
+
+    /// 内容自适应之前的"最大上限"尺寸，用于 NotchView 的 `.frame(maxHeight:)` 约束。
+    var baseOpenedSize: CGSize {
         switch contentType {
         case .chat:
             // Chat view: width fixed, height is max (actual height adapts to content)
@@ -338,6 +357,10 @@ class NotchViewModel: ObservableObject {
         }
         status = .closed
         contentType = .instances
+        // 关闭后清空实测高度，下次打开时从"最大上限"开始，待 NotchView 首次
+        // 渲染完成后再由 GeometryReader 测量上报。避免上次残留的实测值
+        // 污染新一轮 opened 的 hit-test。
+        measuredOpenedHeight = 0
     }
 
     func notchPop() {
@@ -352,6 +375,8 @@ class NotchViewModel: ObservableObject {
 
     func toggleMenu() {
         contentType = contentType == .menu ? .instances : .menu
+        // 内容切换后实测高度失效，清零待下一帧重新测量
+        measuredOpenedHeight = 0
     }
 
     func showChat(for session: SessionState) {
@@ -360,12 +385,14 @@ class NotchViewModel: ObservableObject {
             return
         }
         contentType = .chat(session)
+        measuredOpenedHeight = 0
     }
 
     /// Go back to instances list and clear saved chat state
     func exitChat() {
         currentChatSession = nil
         contentType = .instances
+        measuredOpenedHeight = 0
     }
 
     /// Perform boot animation: expand briefly then collapse

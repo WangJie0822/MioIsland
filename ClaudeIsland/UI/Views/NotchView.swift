@@ -170,7 +170,10 @@ struct NotchView: View {
         case .closed, .popping:
             return closedNotchSize
         case .opened:
-            return viewModel.openedSize
+            // 外层 `.frame(maxHeight:)` 必须用"最大上限"而不是动态 openedSize。
+            // 若用 openedSize（= min(上限, 实测值)），会形成反馈环：frame 变小 →
+            // 重新测量 → 更小 → 再测 → ...。实测只参与 hit-test，不参与布局。
+            return viewModel.baseOpenedSize
         }
     }
 
@@ -354,6 +357,31 @@ struct NotchView: View {
                     contentView
                 }
                 .frame(width: notchSize.width - 24, alignment: .top) // Fixed width to prevent reflow
+                // 测量 VStack 自然高度供 hit-test 使用。内层 ChatView 的 ZStack 在"有内容"
+                // 状态下会 greedy 填满父容器（到 base 高度 580），此时测到的值对 hit-test
+                // 无意义——保持 measuredOpenedHeight=0，让 openedSize 回落到 baseOpenedSize，
+                // hit-test 按 580 判定（与实际可见面板一致，无精度损失）。
+                // 仅在测到"明显小于 base"的值（短内容、空内容、menu 等情况）时写入，供
+                // hit-test 精确区分"可见面板"与"面板下方透明延伸区"，让后者点击穿透。
+                .background(
+                    GeometryReader { proxy in
+                        Color.clear
+                            .task(id: proxy.size.height) {
+                                let h = proxy.size.height
+                                let baseH = viewModel.baseOpenedSize.height
+                                guard h > 50, h < baseH * 0.9 else {
+                                    // Greedy-fill 值（≈ baseH）或异常小值：清零让 openedSize 用 base
+                                    if viewModel.measuredOpenedHeight != 0 {
+                                        viewModel.measuredOpenedHeight = 0
+                                    }
+                                    return
+                                }
+                                if abs(viewModel.measuredOpenedHeight - h) > 0.5 {
+                                    viewModel.measuredOpenedHeight = h
+                                }
+                            }
+                    }
+                )
                 .transition(
                     .asymmetric(
                         insertion: .scale(scale: 0.8, anchor: .top)
