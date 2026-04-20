@@ -95,21 +95,16 @@ class NotchWindowController: NSWindowController {
             }
             .store(in: &cancellables)
 
-        // 动态 ignoresMouseEvents：
-        // - closed / popping：恒 true（事件穿透到菜单栏/下层 App，维持现状）
-        // - opened + 鼠标在面板内：false（按钮可点）
-        // - opened + 鼠标在面板外：true（点击/滚轮/右键/拖拽穿透到下层 App）
+        // 动态 ignoresMouseEvents：鼠标在交互区域（notch+wings 或展开面板内）
+        // 时窗口接收事件，否则事件（左键/右键/滚轮/拖拽）穿透到下层 App。
+        // 折叠态下也按此信号切换：若恒 true，点击 notch 会同时穿到桌面触发
+        // macOS "点按墙纸以显示桌面"隐藏所有窗口；global mouseDown monitor
+        // 是只读旁听无法阻断，只能靠窗口层独占事件。Live edit 模式下
+        // `isMouseInsideInteractiveArea` 被强制为 false，自然维持穿透。
         Publishers.CombineLatest(viewModel.$status, viewModel.$isMouseInsideInteractiveArea)
             .receive(on: DispatchQueue.main)
-            .sink { [weak notchWindow] status, insideInteractive in
-                let shouldIgnore: Bool = {
-                    switch status {
-                    case .opened:
-                        return !insideInteractive
-                    case .closed, .popping:
-                        return true
-                    }
-                }()
+            .sink { [weak notchWindow] _, insideInteractive in
+                let shouldIgnore = !insideInteractive
                 guard let window = notchWindow else { return }
                 if window.ignoresMouseEvents != shouldIgnore {
                     window.ignoresMouseEvents = shouldIgnore
